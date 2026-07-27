@@ -1,0 +1,52 @@
+{
+  "_schema": {
+    "_description": "Each client entry contains Mary Kay InTouch credentials and GoHighLevel API configuration. Add a new entry for each client you onboard.",
+    "fields": {
+      "consultantNum": "Mary Kay InTouch consultant number (e.g. JA7516)",
+      "password": "Mary Kay InTouch account password",
+      "clientName": "Display name for this client (used in logs and API responses)",
+      "ghlApiToken": "GoHighLevel Private Integration Token (pit-xxxx format)",
+      "ghlLocationId": "GoHighLevel Location/Sub-Account ID",
+      "ghlCustomFields": "Map of GHL custom field names to their field IDs. These are set once per GHL location."
+    }
+  },
+
+  "clients": [
+    {
+      "consultantNum": "JA7516",
+      "password": "Wemhoff824!",
+      "clientName": "Whitney Wemhoff",
+      "ghlApiToken": "pit-338ea87d-7b4b-4cf3-95d8-496410a2a568",
+      "ghlLocationId": "3yBoHY6SGAKsQ4F8pvRb",
+      "ghlCustomFields": {
+        "Career Level":                "5zoMGQBN7Hverj88ZWlC",
+        "Activity Status":             "3FG2UYJP4guGtQCSyQHf",
+        "Consultant Number":           "uSzcOt1rsFYuWW39OSNE",
+        "Language Preference":         "FNgVE4W1LCdNSmC8jtsB",
+        "Additional Phone":            "fiX7oPiLzEivUSvSQZ47",
+        "Recruiter First Name":        "g08kaGfix5ni2a8r85kV",
+        "Recruiter Last Name":         "6C7JDNOizxSI6498PQ09",
+        "Recruiter Consultant Number": "2rL7MGjMnN5nunxtOPu8",
+        "Start Date":                  "fEvLkt56ulaW7XSG38ln",
+        "Current Wholesale":           "6u62WUTV6pAYh7doJWPt",
+        "Needed for Sapphire":         "VMQoYgU0uyvdQZFBwkrb",
+        "Needed for Ruby":             "vxpZEnChNyX3ajq07xNI",
+        "Needed for Diamond":          "usNyZCXiSUZgmdFv2L1L",
+        "Needed for Emerald":          "rJx5QEXZRT5uXH8xSiy2",
+        "Needed for Pearl":            "0Bxe5IyL7FucrXttgor8",
+        "Client Last Order":           "73WLlUcJo8SKx5Wf0Zoc",
+        "Apt/Suite/Unit":              "O2sWywIgTIdiAG41FBwP"
+      }
+    }
+  ],
+
+  "_serverConfig": {
+    "_description": "Server-wide settings. API key protects the endpoints. Cron is optional — if true, the server will auto-run the sync at the configured time.",
+    "apiKey": "my-local-test-key",
+    "schedule": {
+      "enabled": true,
+      "cron": "30 0 * * *",
+      "timezone": "America/Chicago"
+    }
+  }
+}
