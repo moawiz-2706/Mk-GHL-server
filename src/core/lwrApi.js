@@ -4,53 +4,81 @@
 // Uses CDP Fetch interception to capture the page's OWN natural LWR API call
 // (during page load/reload), then replays it with the exact same headers
 // to get the Customer List data.
+//
+// Single-page model: the same page navigates between mk and apps domains.
+// Both share cookies via the same browser session.
 // =============================================================================
 
 const logger = require("../utils/logger");
 
 const APPS_BASE    = process.env.APPS_BASE_URL || "https://apps.marykayintouch.com";
-const LWR_ENDPOINT = APPS_BASE + "/webruntime/api/apex/execute?language=en-US&asGuest=false&htmlEncode=false";
 
-function sleep(ms ) {
+function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
- * Navigate the appsPage to /customer-list if it's not already there.
- * Returns true if the page is on the customer-list page.
+ * Ensure the page is on the apps customer-list page.
+ * If not, navigate there and wait for the page to load.
  */
 async function ensureOnCustomerList(page) {
   const url = page.url();
   if (url.includes("apps.marykayintouch.com/customer-list")) {
     return true;
   }
-  logger.info(`[LWR API] Page is on: ${url.substring(0, 80)} — navigating to customer-list...`);
+
+  logger.info(`[LWR API] Page is on: ${url.substring(0, 100)} — navigating to customer-list...`);
+
   try {
     await page.goto(`${APPS_BASE}/customer-list`, {
       waitUntil: "domcontentloaded",
-      timeout: 60000
+      timeout: 90000
     });
-    // Wait longer on cloud servers for SSO redirect chain
+  } catch (e) {
+    logger.warn(`[LWR API] Navigation timeout: ${e.message}`);
+  }
+
+  // Wait for SSO redirect chain
+  await sleep(15000);
+
+  // Wait for URL to stabilize
+  for (let i = 0; i < 30; i++) {
+    const u1 = page.url();
+    await sleep(2000);
+    const u2 = page.url();
+    if (u1 === u2) break;
+  }
+
+  const finalUrl = page.url();
+  if (finalUrl.includes("apps.marykayintouch.com/customer-list")) {
+    return true;
+  }
+
+  logger.warn(`[LWR API] After navigation, page is on: ${finalUrl.substring(0, 100)}`);
+
+  // If stuck on loginFlowOnly, try navigating again
+  if (finalUrl.includes("loginFlowOnly") || finalUrl.includes("LoginIntouchFlow")) {
+    logger.info(`[LWR API] Stuck on auth flow page — waiting 20s then retrying...`);
     await sleep(20000);
-    const afterNav = page.url();
-    if (afterNav.includes("apps.marykayintouch.com/customer-list")) {
+    const retryUrl = page.url();
+    if (retryUrl.includes("apps.marykayintouch.com/customer-list")) {
       return true;
     }
-    // If on frontdoor.jsp, wait for the redirect
-    if (afterNav.includes("frontdoor.jsp")) {
-      logger.info(`[LWR API] On frontdoor.jsp — waiting for redirect...`);
+    // Try one more navigation
+    try {
+      await page.goto(`${APPS_BASE}/customer-list`, {
+        waitUntil: "domcontentloaded",
+        timeout: 90000
+      });
       await sleep(20000);
-      const afterFront = page.url();
-      if (afterFront.includes("apps.marykayintouch.com/customer-list")) {
-        return true;
-      }
+      return page.url().includes("apps.marykayintouch.com/customer-list");
+    } catch (e) {
+      logger.warn(`[LWR API] Retry navigation failed: ${e.message}`);
+      return false;
     }
-    logger.warn(`[LWR API] After navigation, page is on: ${afterNav.substring(0, 80)}`);
-    return false;
-  } catch (e) {
-    logger.warn(`[LWR API] Navigation error: ${e.message}`);
-    return false;
   }
+
+  return false;
 }
 
 /**
@@ -62,43 +90,28 @@ async function ensureOnCustomerList(page) {
  * 5. Replaying it via page.evaluate()
  */
 async function callAppsLwrApi(session, controllerClass, methodName, params, retries = 1) {
-  const page = session.appsPage;
+  const page = session.page;
   const { consultantNum } = session;
 
   if (!page) {
-    logger.error(`[LWR API] appsPage is not available for ${consultantNum}. Skipping.`);
+    logger.error(`[LWR API] Page is not available for ${consultantNum}. Skipping.`);
     return null;
   }
 
   // ── Step 1: Ensure we're on the right page ──
   let onPage = await ensureOnCustomerList(page);
   if (!onPage) {
-    logger.warn(`[LWR API] appsPage not on customer-list for ${consultantNum}. Attempting retry navigation...`);
-    try {
-      await page.goto(`${APPS_BASE}/customer-list`, {
-        waitUntil: "domcontentloaded",
-        timeout: 60000
-      });
-      await sleep(25000);
-      onPage = page.url().includes("apps.marykayintouch.com/customer-list");
-    } catch (e) {
-      logger.warn(`[LWR API] Retry navigation failed: ${e.message}`);
-    }
-    if (!onPage) {
-      logger.error(`[LWR API] Could not get appsPage to customer-list for ${consultantNum}. URL: ${page.url()}`);
-      return null;
-    }
+    logger.error(`[LWR API] Could not get page to customer-list for ${consultantNum}. URL: ${page.url().substring(0, 100)}`);
+    return null;
   }
 
   const client = await page.target().createCDPSession();
   let capturedRequest = null;
-  let captureAttempts = 0;
   const MAX_CAPTURE_ATTEMPTS = 4;
 
   try {
-    while (!capturedRequest && captureAttempts < MAX_CAPTURE_ATTEMPTS) {
-      captureAttempts++;
-      logger.info(`[LWR API] Capture attempt ${captureAttempts}/${MAX_CAPTURE_ATTEMPTS} for ${consultantNum}`);
+    for (let attempt = 1; attempt <= MAX_CAPTURE_ATTEMPTS; attempt++) {
+      logger.info(`[LWR API] Capture attempt ${attempt}/${MAX_CAPTURE_ATTEMPTS} for ${consultantNum}`);
 
       // ── Step 2: Enable CDP Fetch interception ──
       try {
@@ -111,7 +124,6 @@ async function callAppsLwrApi(session, controllerClass, methodName, params, retr
         patterns: [{ urlPattern: "*/webruntime/api/apex/*", requestStage: "Request" }]
       });
 
-      // Clear any previous event listeners
       client.removeAllListeners("Fetch.requestPaused");
 
       client.on("Fetch.requestPaused", async (event) => {
@@ -126,13 +138,12 @@ async function callAppsLwrApi(session, controllerClass, methodName, params, retr
 
       // ── Step 3: Reload the page to trigger the natural LWR API call ──
       logger.info(`[LWR API] Reloading page to trigger LWR API call...`);
-      await page.reload({ waitUntil: "domcontentloaded", timeout: 45000 }).catch(e => {
+      await page.reload({ waitUntil: "domcontentloaded", timeout: 60000 }).catch(e => {
         logger.warn(`[LWR API] Reload timeout (non-fatal): ${e.message}`);
       });
 
       // ── Step 4: Wait for the LWR framework to make its API call ──
-      // On cloud servers, the LWR framework needs more time to initialize
-      await sleep(15000);
+      await sleep(12000);
 
       // Check if LWR framework is loaded
       const lwrReady = await page.evaluate(() => {
@@ -145,27 +156,28 @@ async function callAppsLwrApi(session, controllerClass, methodName, params, retr
 
       logger.info(`[LWR API] LWR framework ready: ${lwrReady}, captured: ${!!capturedRequest}`);
 
-      // If not captured yet, wait more
-      if (!capturedRequest) {
-        await sleep(15000);
-      }
+      if (capturedRequest) break;
 
-      // If still not captured, try navigating away and back to force a fresh load
-      if (!capturedRequest && captureAttempts < MAX_CAPTURE_ATTEMPTS) {
-        logger.info(`[LWR API] Not captured yet — navigating away and back to force fresh load...`);
+      // Wait more
+      await sleep(8000);
+      if (capturedRequest) break;
+
+      // If not captured, navigate away and back
+      if (attempt < MAX_CAPTURE_ATTEMPTS) {
+        logger.info(`[LWR API] Not captured — navigating away and back...`);
         await page.goto(`${APPS_BASE}/`, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
         await sleep(5000);
-        await page.goto(`${APPS_BASE}/customer-list`, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
-        await sleep(20000);
+        await page.goto(`${APPS_BASE}/customer-list`, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+        await sleep(15000);
       }
     }
 
     if (!capturedRequest) {
-      logger.warn(`[LWR API] Could not capture natural LWR API request for ${consultantNum} after ${MAX_CAPTURE_ATTEMPTS} attempts.`);
+      logger.error(`[LWR API] Could not capture natural LWR API request for ${consultantNum} after ${MAX_CAPTURE_ATTEMPTS} attempts.`);
       return null;
     }
 
-    logger.info(`[LWR API] Captured request with ${Object.keys(capturedRequest.headers || {}).length} headers, URL: ${capturedRequest.url}`);
+    logger.info(`[LWR API] Captured request with ${Object.keys(capturedRequest.headers || {}).length} headers`);
 
     // ── Step 5: Replay the captured request with the EXACT same headers ──
     const replayResult = await page.evaluate(async (requestData) => {
@@ -179,7 +191,7 @@ async function callAppsLwrApi(session, controllerClass, methodName, params, retr
       return {
         statusCode: resp.status,
         bodyLength: text.length,
-        text: text.substring(0, 600000)
+        text: text.substring(0, 2000000)
       };
     }, {
       url: capturedRequest.url,
@@ -192,7 +204,7 @@ async function callAppsLwrApi(session, controllerClass, methodName, params, retr
     logger.info(`[LWR API] ${controllerClass}.${methodName} → HTTP ${statusCode} (${bodyLength} bytes)`);
 
     if (statusCode === 401 && retries > 0) {
-      logger.warn(`[LWR API] 401 Unauthorized — retrying with fresh session...`);
+      logger.warn(`[LWR API] 401 Unauthorized — retrying...`);
       return callAppsLwrApi(session, controllerClass, methodName, params, retries - 1);
     }
 
@@ -241,11 +253,8 @@ async function extractCsrfFromPage(page) {
   return token;
 }
 
-/**
- * Get CSRF token for the session (diagnostics only).
- */
 async function getCsrfToken(session) {
-  const page = session.appsPage;
+  const page = session.page;
   if (!page) return "";
   return extractCsrfFromPage(page);
 }

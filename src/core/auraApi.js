@@ -103,7 +103,7 @@ async function fetchAuraMetadata(session, consultantNum) {
   }
 
   // Extract from mk page
-  const page = session.mkPage || session.page;
+  const page = session.page;
   if (page) {
     try {
       const meta = await extractMetadataFromMkPage(page);
@@ -175,6 +175,23 @@ async function callAuraApi(session, controllerClass, methodName, params, pageUri
 
   // Get the aura token from the session (extracted during login)
   const auraToken = session.auraToken || session.mkAuraToken || "";
+
+  // If the page is on the apps domain, navigate back to mk domain for same-origin fetch
+  const currentUrl = page.url();
+  if (currentUrl && currentUrl.includes("apps.marykayintouch.com")) {
+    logger.info(`[Aura] Navigating back to mk domain before API call...`);
+    try {
+      await page.goto(INTOUCH_BASE + "/s/", { waitUntil: "domcontentloaded", timeout: 30000 });
+      // Wait for Aura framework to initialize
+      await page.waitForFunction(
+        'typeof $A !== "undefined" && $A.clientService',
+        { timeout: 15000 }
+      ).catch(() => {});
+      logger.info(`[Aura] Back on mk domain: ${page.url()}`);
+    } catch (e) {
+      logger.warn(`[Aura] Navigation to mk domain issue: ${e.message}`);
+    }
+  }
 
   // Build the aura context — matches the Apps Script exactly
   const auraContext = {

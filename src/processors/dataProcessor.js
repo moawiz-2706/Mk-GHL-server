@@ -256,18 +256,18 @@ async function fetchCustomerListWithRetry(client, existingSession) {
     return result;
   }
 
-  // First attempt failed — try navigating the appsPage to customer-list directly
+  // First attempt failed — try navigating the page to customer-list directly
   logger.warn(`[Customer List] First attempt returned empty. Trying direct navigation...`);
   try {
     const APPS_BASE = process.env.APPS_BASE_URL || "https://apps.marykayintouch.com";
-    const appsPage = pageSession.appsPage;
-    if (appsPage ) {
-      await appsPage.goto(`${APPS_BASE}/customer-list`, {
+    const page = pageSession.page;
+    if (page) {
+      await page.goto(`${APPS_BASE}/customer-list`, {
         waitUntil: "domcontentloaded",
-        timeout: 30000
+        timeout: 60000
       }).catch(e => logger.warn(`[Customer List] Navigation error: ${e.message}`));
       await sleep(20000);
-      const newUrl = appsPage.url();
+      const newUrl = page.url();
       logger.info(`[Customer List] After navigation: ${newUrl.substring(0, 100)}`);
       if (newUrl.includes("customer-list")) {
         result = await fetchCustomerList(pageSession, client.consultantNum);
@@ -284,10 +284,11 @@ async function fetchCustomerListWithRetry(client, existingSession) {
 
   pageSession = await getSession(client.consultantNum, client.password, true);
   const apiSession = {
-    mkPage:        pageSession.mkPage,
-    appsPage:      pageSession.appsPage,
-    consultantNum: client.consultantNum,
-    auraToken:     pageSession.auraToken || ""
+    page:            pageSession.page,
+    consultantNum:   client.consultantNum,
+    auraToken:       pageSession.auraToken || "",
+    auraFwuid:       pageSession.auraFwuid || "",
+    auraAppVersion:  pageSession.auraAppVersion || ""
   };
   result = await fetchCustomerList(apiSession, client.consultantNum);
 
@@ -301,10 +302,11 @@ async function fetchCustomerListWithRetry(client, existingSession) {
 
   pageSession = await getSession(client.consultantNum, client.password, true);
   const apiSession2 = {
-    mkPage:        pageSession.mkPage,
-    appsPage:      pageSession.appsPage,
-    consultantNum: client.consultantNum,
-    auraToken:     pageSession.auraToken || ""
+    page:            pageSession.page,
+    consultantNum:   client.consultantNum,
+    auraToken:       pageSession.auraToken || "",
+    auraFwuid:       pageSession.auraFwuid || "",
+    auraAppVersion:  pageSession.auraAppVersion || ""
   };
   result = await fetchCustomerList(apiSession2, client.consultantNum);
 
@@ -315,7 +317,6 @@ async function fetchCustomerListWithRetry(client, existingSession) {
   logger.error(`[Customer List] All retry attempts exhausted. Skipping.`);
   return [];
 }
-
 
 // =============================================================================
 // MERGE: Combine all data into master contact records
@@ -680,12 +681,13 @@ async function processClient(client) {
   }
 
   // Build the session object used by auraApi and lwrApi.
-  // Two-tab model: mkPage for Aura API, appsPage for LWR API.
+  // Single-page model: one page navigates between mk and apps domains.
   const pageApiSession = {
-    mkPage:          pageSession.mkPage,
-    appsPage:        pageSession.appsPage,
+    page:            pageSession.page,
     consultantNum:   client.consultantNum,
-    auraToken:       pageSession.auraToken || ""
+    auraToken:       pageSession.auraToken || "",
+    auraFwuid:       pageSession.auraFwuid || "",
+    auraAppVersion:  pageSession.auraAppVersion || ""
   };
 
   // 2. Fetch Consultant List (Aura API via page.evaluate)

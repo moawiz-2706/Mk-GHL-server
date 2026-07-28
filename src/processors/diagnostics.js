@@ -17,14 +17,15 @@ const logger = require("../utils/logger");
 
 /**
  * Build a session object for data fetching.
- * Two-tab model: mkPage for Aura API, appsPage for LWR API.
+ * Single-page model: one page navigates between mk and apps domains.
  */
 function buildPageSession(session) {
   return {
-    mkPage:          session.mkPage,
-    appsPage:        session.appsPage,
+    page:            session.page,
     consultantNum:   session.consultantNum,
-    auraToken:       session.auraToken || ""
+    auraToken:       session.auraToken || "",
+    auraFwuid:       session.auraFwuid || "",
+    auraAppVersion:  session.auraAppVersion || ""
   };
 }
 
@@ -92,6 +93,7 @@ async function fetchRawData(client) {
   result.sessionInfo = {
     mkUrl:     session.mkUrl || "",
     appsUrl:   session.appsUrl || "",
+    pageUrl:   session.page ? (() => { try { return session.page.url(); } catch (e) { return "closed"; } })() : "none",
     appsReady: session.appsSessionValid || false,
     fromCache: session.fromCache || false
   };
